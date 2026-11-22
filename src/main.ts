@@ -1,5 +1,6 @@
 import { downInCamera, leanBetween, plumbDirectionAt, rotateForScreen, Smoother, tiltDegrees, upInDevice, type Vec3 } from "./geometry";
-import { sampleModel, segment, type ColorModel, type Segmentation } from "./segment";
+import { FilesetResolver, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
+import { analyzeMask, sampleModel, segment, type ColorModel, type Segmentation } from "./segment";
 import { Sensors } from "./sensors";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -14,6 +15,49 @@ const small = document.createElement("canvas");
 const sctx = small.getContext("2d", { willReadFrequently: true })!;
 
 let model: ColorModel = { kind: "green" };
+// Smart mode: a small on-phone model cuts out whatever is at the tapped point (starts at the middle of the picture).
+// It copes with decorated trees, where plain colour matching does not.
+let useModel = true;
+let ml: InteractiveSegmenterLegacy | null = null;
+let mlState: "loading" | "ready" | "failed" = "loading";
+let mlBusy = false;
+let mlSeg: Segmentation | null = null;
+let aim = { x: 0.5, y: 0.58 };
+const mlCanvas = document.createElement("canvas");
+const mctx = mlCanvas.getContext("2d")!;
+async function loadModel() {
+  try {
+    const fs = await FilesetResolver.forVisionTasks("wasm");
+    ml = await InteractiveSegmenterLegacy.createFromOptions(fs, {
+      baseOptions: { modelAssetPath: "models/magic_touch.tflite" },
+      outputConfidenceMasks: true, outputCategoryMask: false,
+    });
+    mlState = "ready";
+  } catch (e) { mlState = "failed"; useModel = false; syncModeButton(); }
+}
+function syncModeButton() { $("auto").textContent = useModel ? "Smart find" : "Green tree"; $("auto").classList.toggle("on", useModel); }
+function runModel() {
+  if (!ml || mlBusy || !video.videoWidth) return;
+  mlBusy = true;
+  const vw = video.videoWidth, vh = video.videoHeight, long = 448;
+  const cw = vw >= vh ? long : Math.round((long * vw) / vh), ch = vw >= vh ? Math.round((long * vh) / vw) : long;
+  if (mlCanvas.width !== cw || mlCanvas.height !== ch) { mlCanvas.width = cw; mlCanvas.height = ch; }
+  mctx.drawImage(video, 0, 0, cw, ch);
+  try {
+    ml.segment(mlCanvas, { keypoint: { x: aim.x, y: aim.y } }, (r) => {
+      try {
+        const m = r.confidenceMasks?.[0];
+        if (m) {
+          const a = m.getAsFloat32Array(), w = m.width, h = m.height;
+          const mask = new Uint8Array(w * h);
+          let n = 0;
+          for (let i = 0; i < a.length; i++) if (a[i] > 0.5) { mask[i] = 1; n++; }
+          mlSeg = n ? analyzeMask(mask, n, w, h) : { w, h, mask, rows: [], fit: null, top: 0, bottom: 0, coverage: 0, ok: false, reason: "Nothing found there. Tap the tree" };
+        }
+      } finally { mlBusy = false; }
+    });
+  } catch { mlBusy = false; mlState = "failed"; useModel = false; syncModeButton(); }
+}
 let showMask = false;
 let busy = false; // calibrating
 let lastRgba: Uint8ClampedArray | null = null;
@@ -22,15 +66,27 @@ let lastFrameT = 0, fps = 0;
 
 $("start").addEventListener("click", start);
 $("cal").addEventListener("click", calibrate);
-$("auto").addEventListener("click", () => { model = { kind: "green" }; smoother.clear(); flash("Looking for a green tree"); });
+$("auto").addEventListener("click", () => {
+  if (mlState === "failed") { flash("Smart find isn't available on this phone"); return; }
+  useModel = !useModel; model = { kind: "green" }; mlSeg = null; smoother.clear(); syncModeButton();
+  flash(useModel ? "Smart find: tap the tree if it picks the wrong thing" : "Looking for a green tree. Tap it to learn its colour");
+});
+syncModeButton();
+loadModel();
 $("maskBtn").addEventListener("click", () => { showMask = !showMask; $("maskBtn").classList.toggle("on", showMask); });
 $("frame").addEventListener("click", (e) => {
   if (!lastRgba || !aw) return;
   const r = overlay.getBoundingClientRect();
   const x = Math.round(((e.clientX - r.left) / r.width) * aw);
   const y = Math.round(((e.clientY - r.top) / r.height) * ah);
-  model = sampleModel(lastRgba, aw, ah, x, y);
   smoother.clear();
+  if (useModel) {
+    aim = { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+    mlSeg = null;
+    flash("Looking at what you tapped");
+    return;
+  }
+  model = sampleModel(lastRgba, aw, ah, x, y);
   flash("Learned the tree's colour");
 });
 
@@ -101,14 +157,20 @@ function loop(t: number) {
   sctx.drawImage(video, 0, 0, aw, ah);
   const img = sctx.getImageData(0, 0, aw, ah);
   lastRgba = img.data;
-  const seg = segment(img.data, aw, ah, model);
+  let seg: Segmentation;
+  if (useModel) {
+    runModel();
+    seg = mlSeg ?? { w: aw, h: ah, mask: new Uint8Array(0), rows: [], fit: null, top: 0, bottom: 0, coverage: 0, ok: false,
+      reason: mlState === "loading" ? "Loading the tree finder (first time takes a moment)..." : "Looking for the tree..." };
+  } else seg = segment(img.data, aw, ah, model);
+  const sw = useModel && mlSeg ? mlSeg.w : aw, sh = useModel && mlSeg ? mlSeg.h : ah;
 
   const gdown = gravityDown();
   const down: Vec3 = gdown ?? { x: 0, y: 1, z: 0 };
   let lean: number | null = null;
   let plumbDir = { x: 0, y: 1 };
   if (seg.ok && seg.fit) {
-    plumbDir = plumbDirectionAt({ x: seg.fit.x0, y: seg.fit.y0 }, down, aw, ah);
+    plumbDir = plumbDirectionAt({ x: seg.fit.x0, y: seg.fit.y0 }, down, sw, sh);
     lean = leanBetween(plumbDir, seg.fit.dir);
     smoother.push(t, lean);
   } else {
@@ -138,7 +200,7 @@ function updateReadout(seg: Segmentation, gdown: Vec3 | null) {
     parts.push(`phone tilt ${t.roll.toFixed(1)}° side, ${t.pitch.toFixed(0)}° up/down`);
     parts.push(sensors.calibratedAt ? "calibrated" : "not calibrated");
   } else parts.push("no sensor");
-  parts.push(model.kind === "green" ? "green mode" : "tapped colour");
+  parts.push(useModel ? "smart find" : model.kind === "green" ? "green mode" : "tapped colour");
   parts.push(fps.toFixed(0) + " fps");
   statusEl.textContent = parts.join(" · ");
 }
@@ -149,7 +211,8 @@ function draw(seg: Segmentation, down: Vec3) {
   if (overlay.width !== Math.round(r.width * dpr)) { overlay.width = Math.round(r.width * dpr); overlay.height = Math.round(r.height * dpr); }
   const W = overlay.width, H = overlay.height;
   octx.clearRect(0, 0, W, H);
-  const sx = W / aw, sy = H / ah;
+  const gw = seg.w, gh = seg.h;
+  const sx = W / gw, sy = H / gh;
 
   if (showMask && seg.mask) {
     octx.fillStyle = "rgba(60,255,120,0.35)";
@@ -157,11 +220,11 @@ function draw(seg: Segmentation, down: Vec3) {
   }
   octx.lineWidth = Math.max(2, 2 * dpr);
   // true plumb line: through the middle of the picture (or the tree), following gravity
-  const px = seg.ok && seg.fit ? seg.fit.x0 : aw / 2, py = seg.ok && seg.fit ? seg.fit.y0 : ah / 2;
-  const g = plumbDirectionAt({ x: px, y: py }, down, aw, ah);
+  const px = seg.ok && seg.fit ? seg.fit.x0 : gw / 2, py = seg.ok && seg.fit ? seg.fit.y0 : gh / 2;
+  const g = plumbDirectionAt({ x: px, y: py }, down, gw, gh);
   octx.strokeStyle = "rgba(90,200,255,0.95)";
   octx.setLineDash([10 * dpr, 6 * dpr]);
-  line(px - g.x * ah * 2, py - g.y * ah * 2, px + g.x * ah * 2, py + g.y * ah * 2, sx, sy);
+  line(px - g.x * gh * 2, py - g.y * gh * 2, px + g.x * gh * 2, py + g.y * gh * 2, sx, sy);
   octx.setLineDash([]);
   if (seg.ok && seg.fit) {
     const f = seg.fit, span = Math.max(1, seg.bottom - seg.top);

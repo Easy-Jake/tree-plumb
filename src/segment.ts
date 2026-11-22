@@ -84,6 +84,13 @@ export function segment(rgba: Uint8ClampedArray | Uint8Array, w: number, h: numb
   if (!bestId) return blank("No tree-coloured area found");
   for (let i = 0; i < n; i++) mask[i] = label[i] === bestId ? 1 : 0;
 
+  return analyzeMask(mask, best, w, h);
+}
+
+/** Outline, centre line and sanity checks for a finished tree mask (shared by colour and model modes). */
+export function analyzeMask(mask: Uint8Array, best: number, w: number, h: number): Segmentation {
+  const n = w * h;
+  const blank = (reason: string): Segmentation => ({ w, h, mask, rows: [], fit: null, top: 0, bottom: 0, coverage: 0, ok: false, reason });
   // per-row outer edges: ornaments and lights inside the tree don't matter, only the outline
   const rows: Segmentation["rows"] = [];
   let top = h, bottom = -1;
