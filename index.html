@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Tree Plumb</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; font: 16px/1.3 system-ui, -apple-system, sans-serif; overflow: hidden; touch-action: manipulation; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #frame { position: relative; width: 100vw; height: 100dvh; }
+  video, canvas#overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  video { object-fit: contain; background: #111; }
+  canvas#overlay { pointer-events: none; }
+  #readout { position: fixed; top: max(10px, env(safe-area-inset-top)); left: 0; right: 0; text-align: center; pointer-events: none; text-shadow: 0 1px 6px #000; }
+  #deg { font-size: 56px; font-weight: 800; letter-spacing: -1px; }
+  #dir { font-size: 20px; font-weight: 600; margin-top: -4px; }
+  #hint { font-size: 14px; opacity: .85; margin-top: 4px; padding: 0 16px; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 10px max(10px, env(safe-area-inset-bottom)); display: flex; gap: 8px; justify-content: center; background: linear-gradient(transparent, rgba(0,0,0,.7)); }
+  button { font: inherit; font-weight: 600; color: #fff; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); border-radius: 12px; padding: 12px 14px; }
+  button.on { background: #1e6bff; border-color: #1e6bff; }
+  #status { position: fixed; left: 8px; bottom: 74px; font-size: 12px; opacity: .8; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  #splash { position: fixed; inset: 0; background: #0b1a10; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 14px; z-index: 5; }
+  #splash h1 { margin: 0; font-size: 34px; }
+  #splash p { margin: 0; max-width: 28em; opacity: .85; }
+  #start { background: #1e9e4a; border-color: #1e9e4a; font-size: 22px; padding: 16px 34px; }
+  #msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.75); z-index: 6; text-align: center; padding: 24px; font-size: 22px; font-weight: 600; }
+  #err { color: #ff9a8a; min-height: 1.3em; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="frame">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+</div></div>
+<div id="readout"><div id="deg">--</div><div id="dir"></div><div id="hint"></div></div>
+<div id="status"></div>
+<div id="bar">
+  <button id="cal">Calibrate</button>
+  <button id="maskBtn">Show outline</button>
+  <button id="auto">Green tree</button>
+</div>
+<div id="msg"></div>
+<div id="splash">
+  <h1>Tree Plumb</h1>
+  <p>Stand back from the tree with your phone held upright, pointed at the whole tree. Everything runs on this phone; no video leaves it.</p>
+  <p>Tap the tree on screen to teach it the tree's colour if it isn't green.</p>
+  <button id="start">Start</button>
+  <div id="err"></div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
