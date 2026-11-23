@@ -123,3 +123,28 @@ describe("smoothing and fitting", () => {
     expect(f.dir.x / f.dir.y).toBeCloseTo(0.1, 2);
   });
 });
+
+import { findBend } from "../src/geometry";
+describe("bend detection", () => {
+  const mk = (bendAt: number, upperDeg: number, noise = 0.6) => {
+    const ys: number[] = [], xs: number[] = []; let s = 3;
+    const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296 - 0.5);
+    for (let y = 40; y <= 220; y++) {
+      const up = Math.max(0, bendAt - y);               // distance above the bend (smaller y = higher)
+      ys.push(y); xs.push(72 + Math.tan((upperDeg * Math.PI) / 180) * up + rnd() * noise * 2);
+    }
+    return { ys, xs };
+  };
+  it("finds a bend where the top section tilts", () => {
+    const { ys, xs } = mk(120, 4);
+    const b = findBend(ys, xs)!;
+    expect(b).not.toBeNull();
+    expect(Math.abs(b.y - 120)).toBeLessThan(14);
+  });
+  it("reports no bend for one straight lean", () => {
+    const { ys, xs } = mk(120, 0);
+    expect(findBend(ys, xs)).toBeNull();
+    const t = mk(300, 3); // bend far below the tree: one straight line
+    expect(findBend(t.ys, t.xs)).toBeNull();
+  });
+});

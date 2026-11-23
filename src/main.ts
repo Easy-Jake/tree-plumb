@@ -11,6 +11,8 @@ const degEl = $("deg"), dirEl = $("dir"), hintEl = $("hint"), statusEl = $("stat
 
 const sensors = new Sensors();
 const smoother = new Smoother(2000);
+const bendY = new Smoother(2500), bendLow = new Smoother(2500), bendUp = new Smoother(2500);
+let bendSeen = new Smoother(2500); // 1 = a bend was found this frame, 0 = not
 const small = document.createElement("canvas");
 const sctx = small.getContext("2d", { willReadFrequently: true })!;
 
@@ -173,8 +175,14 @@ function loop(t: number) {
     plumbDir = plumbDirectionAt({ x: seg.fit.x0, y: seg.fit.y0 }, down, sw, sh);
     lean = leanBetween(plumbDir, seg.fit.dir);
     smoother.push(t, lean);
+    if (seg.bend) {
+      bendSeen.push(t, 1);
+      bendY.push(t, seg.bend.y);
+      bendLow.push(t, leanBetween(plumbDir, seg.bend.lower));
+      bendUp.push(t, leanBetween(plumbDir, seg.bend.upper));
+    } else bendSeen.push(t, 0);
   } else {
-    smoother.clear();
+    smoother.clear(); bendY.clear(); bendLow.clear(); bendUp.clear(); bendSeen.clear();
   }
   draw(seg, down);
   updateReadout(seg, gdown);
@@ -191,7 +199,14 @@ function updateReadout(seg: Segmentation, gdown: Vec3 | null) {
     dirEl.textContent = a < 0.05 ? "straight" : m > 0 ? "leaning right →" : "← leaning left";
     degEl.style.color = a < 0.5 ? "#4cff8a" : a < 1.5 ? "#ffd84c" : "#ff6b5c";
     const steady = smoother.spread < 0.25 && smoother.count > 12;
-    hint(steady ? "Steady. As seen from this side only." : "Settling... hold still");
+    const bent = bendSeen.count > 8 && (bendSeen.median ?? 0) > 0.5 && bendY.count > 4;
+    if (!steady) hint("Settling... hold still");
+    else if (bent) {
+      const pct = Math.round(Math.min(1, Math.max(0, (seg.bottom - (bendY.median ?? 0)) / Math.max(1, seg.bottom - seg.top))) * 100), lo = bendLow.median ?? 0, up = bendUp.median ?? 0;
+      const side = (v: number) => (Math.abs(v) < 0.05 ? "straight" : Math.abs(v).toFixed(1) + "° " + (v > 0 ? "right" : "left"));
+      hint(`Bends about ${pct}% of the way up. Below it: ${side(lo)}. Above it: ${side(up)}. Seen from this side only.`);
+    } else if (bendSeen.count > 8) hint("One smooth lean, no bend found. Seen from this side only.");
+    else hint("Steady. As seen from this side only.");
   }
   const parts: string[] = [];
   if (gdown) {
@@ -226,6 +241,14 @@ function draw(seg: Segmentation, down: Vec3) {
   octx.setLineDash([10 * dpr, 6 * dpr]);
   line(px - g.x * gh * 2, py - g.y * gh * 2, px + g.x * gh * 2, py + g.y * gh * 2, sx, sy);
   octx.setLineDash([]);
+  if (seg.ok && seg.fit && seg.bend && (bendSeen.median ?? 0) > 0.5 && bendY.median !== null) {
+    // marker at the smoothed bend height
+    const yb = bendY.median;
+    const f = seg.fit, xb = f.x0 + (f.dir.x / f.dir.y) * (yb - f.y0);
+    octx.strokeStyle = "rgba(255,70,200,0.95)"; octx.lineWidth = Math.max(3, 3 * dpr);
+    line(xb - 40, yb, xb + 40, yb, sx, sy);
+    octx.lineWidth = Math.max(2, 2 * dpr);
+  }
   if (seg.ok && seg.fit) {
     const f = seg.fit, span = Math.max(1, seg.bottom - seg.top);
     const yTop = seg.top, yBot = seg.bottom;

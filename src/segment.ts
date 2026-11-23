@@ -2,7 +2,7 @@
 // downloads, no model, a few milliseconds per frame on a phone. Two modes:
 //   "green":  anything green (a normal tree, real or artificial)
 //   "sample": colours close to a patch the user tapped (flocked, white, blue trees)
-import { fitCenterLine, type Fit } from "./geometry";
+import { findBend, fitCenterLine, type Bend, type Fit } from "./geometry";
 
 export type ColorModel =
   | { kind: "green" }
@@ -13,6 +13,7 @@ export type Segmentation = {
   mask: Uint8Array;       // 1 = tree (largest blob only)
   rows: { y: number; left: number; right: number }[];
   fit: Fit | null;
+  bend?: Bend | null;      // where the centre line changes direction, if it does
   top: number; bottom: number; // blob extent (rows)
   coverage: number;       // fraction of the frame that is tree
   ok: boolean;
@@ -109,7 +110,8 @@ export function analyzeMask(mask: Uint8Array, best: number, w: number, h: number
   const ys: number[] = [], xs: number[] = [];
   for (const r of rows) if (r.y >= y0 && r.y <= y1 && r.right - r.left >= 3) { ys.push(r.y + 0.5); xs.push((r.left + r.right) / 2); }
   const fit = fitCenterLine(ys, xs);
-  return { w, h, mask, rows, fit, top, bottom, coverage, ok: !!fit, reason: fit ? undefined : "Couldn't trace the centre line" };
+  const bend = findBend(ys, xs);
+  return { w, h, mask, rows, fit, bend, top, bottom, coverage, ok: !!fit, reason: fit ? undefined : "Couldn't trace the centre line" };
 }
 
 function erode(a: Uint8Array, w: number, h: number): Uint8Array {
