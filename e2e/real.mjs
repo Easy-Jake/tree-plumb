@@ -17,5 +17,8 @@ await page.waitForFunction(() => document.getElementById("splash").style.display
 await page.click("#maskBtn");
 await page.waitForTimeout(15000);
 console.log("deg:", await page.textContent("#deg"), await page.textContent("#dir"), "|", await page.textContent("#hint"), "|", await page.textContent("#status"));
+console.log("photos button:", await page.textContent("#photos"));
+await page.click("#photos");
+await page.waitForTimeout(500);
 await page.screenshot({ path: out });
 await browser.close(); server.close();

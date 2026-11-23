@@ -20,7 +20,14 @@
   #dir { font-size: 20px; font-weight: 600; margin-top: -4px; }
   #hint { font-size: 14px; opacity: .85; margin-top: 4px; padding: 0 16px; }
   #bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 10px max(10px, env(safe-area-inset-bottom)); display: flex; gap: 8px; justify-content: center; background: linear-gradient(transparent, rgba(0,0,0,.7)); }
-  button { font: inherit; font-weight: 600; color: #fff; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); border-radius: 12px; padding: 12px 14px; }
+  button { font: inherit; font-weight: 600; color: #fff; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); border-radius: 12px; padding: 11px 9px; font-size: 15px; }
+  #bar { flex-wrap: wrap; }
+  #gallery { position: fixed; inset: 0; background: #0b0b0b; z-index: 7; display: none; flex-direction: column; }
+  #gallery .top { display: flex; justify-content: space-between; align-items: center; padding: max(12px, env(safe-area-inset-top)) 14px 10px; }
+  #gallery .list { overflow-y: auto; padding: 0 12px 24px; display: flex; flex-direction: column; gap: 18px; }
+  #gallery img { width: 100%; border-radius: 10px; display: block; }
+  #gallery .cap { font-size: 14px; opacity: .8; margin: 4px 2px 6px; }
+  #gallery .empty { opacity: .7; padding: 20px 4px; }
   button.on { background: #1e6bff; border-color: #1e6bff; }
   #status { position: fixed; left: 8px; bottom: 74px; font-size: 12px; opacity: .8; text-shadow: 0 1px 3px #000; pointer-events: none; }
   #splash { position: fixed; inset: 0; background: #0b1a10; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 14px; z-index: 5; }
@@ -41,11 +48,14 @@
 <div id="bar">
   <button id="cal">Calibrate</button>
   <button id="maskBtn">Show outline</button>
-  <button id="auto">Green tree</button>
+  <button id="auto">Smart find</button>
+  <button id="autoPhoto" class="on">Auto photos</button>
+  <button id="photos">Photos (0)</button>
 </div>
+<div id="gallery"><div class="top"><b>Saved photos</b><button id="closeGallery">Close</button></div><div class="list" id="galleryList"></div></div>
 <div id="msg"></div>
 <div id="splash">
-  <h1>Erection Correction</h1><p style="font-size:13px;opacity:.6">version 4: now finds where it bends</p>
+  <h1>Erection Correction</h1><p style="font-size:13px;opacity:.6">version 5: takes its own photos</p>
   <p>Stand back from the tree with your phone held upright, pointed at the whole tree. Everything runs on this phone; no video leaves it.</p>
   <p>It finds the tree by itself. If it picks the wrong thing, tap the tree on screen.</p>
   <button id="start">Start</button>

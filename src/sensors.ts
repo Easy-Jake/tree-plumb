@@ -58,7 +58,7 @@ export class Sensors {
     const sd = Math.sqrt(s.reduce((t, v) => t + (v.x - m.x) ** 2 + (v.y - m.y) ** 2 + (v.z - m.z) ** 2, 0) / s.length);
     const g = Math.hypot(m.x, m.y, m.z);
     if (sd > 0.08) return { ok: false, message: "The phone moved. Lay it flat and keep still, then try again." };
-    if (Math.abs(m.z) < g * 0.97) return { ok: false, message: "The phone isn't flat. Lay it screen-up on a table." };
+    if (Math.abs(m.z) < g * 0.97) return { ok: false, message: "The phone isn't flat. Lay it flat on a table, screen facing up or down." };
     this.bias = { x: m.x, y: m.y, z: 0 };
     this.calibratedAt = Date.now();
     try { localStorage.setItem(BIAS_KEY, JSON.stringify({ ...this.bias, t: this.calibratedAt })); } catch { /* ignore */ }

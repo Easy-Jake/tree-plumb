@@ -66,6 +66,72 @@ let lastRgba: Uint8ClampedArray | null = null;
 let aw = 0, ah = 0;
 let lastFrameT = 0, fps = 0;
 
+// Photos: saved automatically once the reading has held steady for a few seconds, and again after the
+// tree is adjusted and settles on a new reading, so nobody has to touch the phone.
+type Photo = { url: string; text: string; time: Date };
+const photos: Photo[] = [];
+let autoPhoto = true;
+let steadySince = 0;
+let lastShotDeg: number | null = null;
+let lastShotAt = 0;
+let lastHint = "";
+let takePhotoSoon: { deg: number; label: string } | null = null;
+function takePhoto(deg: number, label: string): void {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw) return;
+  const c = document.createElement("canvas");
+  c.width = vw; c.height = vh;
+  const x = c.getContext("2d")!;
+  x.drawImage(video, 0, 0, vw, vh);
+  x.drawImage(overlay, 0, 0, vw, vh);
+  const fs = Math.round(vw / 9);
+  x.textAlign = "center"; x.lineJoin = "round";
+  const say = (t: string, y: number, size: number, color: string) => {
+    x.font = `800 ${size}px system-ui, sans-serif`; x.lineWidth = size / 6; x.strokeStyle = "rgba(0,0,0,.75)"; x.fillStyle = color;
+    x.strokeText(t, vw / 2, y); x.fillText(t, vw / 2, y);
+  };
+  say(label, fs * 1.2, fs, Math.abs(deg) < 0.5 ? "#4cff8a" : Math.abs(deg) < 1.5 ? "#ffd84c" : "#ff6b5c");
+  x.font = `600 ${Math.round(fs / 3)}px system-ui, sans-serif`; x.lineWidth = fs / 14;
+  const small = Math.round(fs / 3);
+  wrap(lastHint, vw * 0.92, x).forEach((ln, i) => say(ln, fs * 1.2 + small * 1.5 * (i + 1), small, "#fff"));
+  c.toBlob((b) => {
+    if (!b) return;
+    photos.unshift({ url: URL.createObjectURL(b), text: `${label}${lastHint ? " · " + lastHint : ""}`, time: new Date() });
+    $("photos").textContent = `Photos (${photos.length})`;
+    flash(`Photo ${photos.length} saved`);
+    renderGallery();
+  }, "image/jpeg", 0.9);
+}
+function wrap(text: string, maxW: number, x: CanvasRenderingContext2D): string[] {
+  const words = text.split(" "), lines: string[] = []; let cur = "";
+  for (const w of words) { const t = cur ? cur + " " + w : w; if (x.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur);
+  return lines.slice(0, 3);
+}
+function renderGallery() {
+  const list = $("galleryList");
+  list.innerHTML = "";
+  if (!photos.length) { list.innerHTML = '<div class="empty">Nothing yet. Photos are taken by themselves when the reading holds steady for a few seconds.</div>'; return; }
+  for (const p of photos) {
+    const wrapEl = document.createElement("div");
+    const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = p.time.toLocaleTimeString() + " · " + p.text;
+    const img = document.createElement("img"); img.src = p.url;
+    const btn = document.createElement("button"); btn.textContent = "Save / share";
+    btn.onclick = async () => {
+      try {
+        const blob = await (await fetch(p.url)).blob();
+        const file = new File([blob], `erection-correction-${p.time.getTime()}.jpg`, { type: "image/jpeg" });
+        if ((navigator as any).canShare?.({ files: [file] })) await (navigator as any).share({ files: [file] });
+        else flash("Press and hold the picture, then choose Save to Photos");
+      } catch { /* share cancelled */ }
+    };
+    wrapEl.append(cap, img, btn); list.append(wrapEl);
+  }
+}
+$("photos").addEventListener("click", () => { renderGallery(); $("gallery").style.display = "flex"; });
+$("closeGallery").addEventListener("click", () => { $("gallery").style.display = "none"; });
+$("autoPhoto").addEventListener("click", () => { autoPhoto = !autoPhoto; $("autoPhoto").classList.toggle("on", autoPhoto); flash(autoPhoto ? "Photos will be taken by themselves" : "Automatic photos off"); });
+
 $("start").addEventListener("click", start);
 $("cal").addEventListener("click", calibrate);
 $("auto").addEventListener("click", () => {
@@ -118,13 +184,13 @@ async function start() {
 
 function flash(text: string) { msgEl.textContent = text; msgEl.style.display = "flex"; msgEl.style.background = "rgba(0,0,0,.35)"; setTimeout(() => { if (!busy) msgEl.style.display = "none"; }, 900); }
 let hintTimer = 0;
-function hint(t: string, ms = 0) { hintEl.textContent = t; clearTimeout(hintTimer); if (ms) hintTimer = window.setTimeout(() => (hintEl.textContent = ""), ms); }
+function hint(t: string, ms = 0) { hintEl.textContent = t; lastHint = t; clearTimeout(hintTimer); if (ms) hintTimer = window.setTimeout(() => (hintEl.textContent = ""), ms); }
 
 async function calibrate() {
   if (!sensors.active) { flash("No motion sensor to calibrate"); return; }
   busy = true;
   msgEl.style.background = "rgba(0,0,0,.8)"; msgEl.style.display = "flex";
-  for (let i = 5; i > 0; i--) { msgEl.textContent = `Lay the phone flat on a table, screen up. Starting in ${i}`; await sleep(1000); }
+  for (let i = 5; i > 0; i--) { msgEl.textContent = `Lay the phone flat on a table (on its back or face down, not on its edge). Starting in ${i}`; await sleep(1000); }
   msgEl.textContent = "Hold still...";
   const r = await sensors.calibrateFlat(2000);
   msgEl.textContent = r.message + "  Pick the phone back up.";
@@ -186,11 +252,13 @@ function loop(t: number) {
   }
   draw(seg, down);
   updateReadout(seg, gdown);
+  if (takePhotoSoon) { const p = takePhotoSoon; takePhotoSoon = null; takePhoto(p.deg, p.label); }
 }
 
 function updateReadout(seg: Segmentation, gdown: Vec3 | null) {
   const m = smoother.median;
   if (m === null || smoother.count < 5) {
+    steadySince = 0;
     degEl.textContent = "--"; dirEl.textContent = ""; degEl.style.color = "#fff";
     hint(seg.reason ?? "Reading...");
   } else {
@@ -199,6 +267,13 @@ function updateReadout(seg: Segmentation, gdown: Vec3 | null) {
     dirEl.textContent = a < 0.05 ? "straight" : m > 0 ? "leaning right →" : "← leaning left";
     degEl.style.color = a < 0.5 ? "#4cff8a" : a < 1.5 ? "#ffd84c" : "#ff6b5c";
     const steady = smoother.spread < 0.25 && smoother.count > 12;
+    const now = performance.now();
+    if (steady && seg.ok) { if (!steadySince) steadySince = now; } else steadySince = 0;
+    const moved = lastShotDeg === null || Math.abs(m - lastShotDeg) >= 0.4;
+    if (autoPhoto && steadySince && now - steadySince >= 3000 && moved && now - lastShotAt > 4000) {
+      lastShotDeg = m; lastShotAt = now;
+      takePhotoSoon = { deg: m, label: (a.toFixed(1) + "° ") + (a < 0.05 ? "straight" : m > 0 ? "leaning right" : "leaning left") };
+    }
     const bent = bendSeen.count > 8 && (bendSeen.median ?? 0) > 0.5 && bendY.count > 4;
     if (!steady) hint("Settling... hold still");
     else if (bent) {
