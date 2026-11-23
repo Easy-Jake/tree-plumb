@@ -69,6 +69,33 @@ let lastFrameT = 0, fps = 0;
 // Photos: saved automatically once the reading has held steady for a few seconds, and again after the
 // tree is adjusted and settles on a new reading, so nobody has to touch the phone.
 type Photo = { url: string; text: string; time: Date };
+// Photos are kept on the phone (IndexedDB) so they survive closing the page. Nothing is uploaded.
+const dbp: Promise<IDBDatabase | null> = new Promise((res) => {
+  try {
+    const rq = indexedDB.open("erection-correction", 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore("photos", { keyPath: "id" });
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => res(null);
+  } catch { res(null); }
+});
+async function dbSave(id: number, blob: Blob, text: string) {
+  const db = await dbp; if (!db) return;
+  try { db.transaction("photos", "readwrite").objectStore("photos").put({ id, blob, text }); } catch { /* storage full or blocked */ }
+}
+async function dbLoad() {
+  const db = await dbp; if (!db) return;
+  const rq = db.transaction("photos").objectStore("photos").getAll();
+  rq.onsuccess = () => {
+    const rows = (rq.result as { id: number; blob: Blob; text: string }[]).sort((a, b) => b.id - a.id);
+    for (const r of rows) if (!photos.some((p) => p.time.getTime() === r.id)) photos.push({ url: URL.createObjectURL(r.blob), text: r.text, time: new Date(r.id) });
+    photos.sort((a, b) => b.time.getTime() - a.time.getTime());
+    $("photos").textContent = `Photos (${photos.length})`;
+  };
+}
+async function dbDelete(id: number) {
+  const db = await dbp; if (!db) return;
+  try { db.transaction("photos", "readwrite").objectStore("photos").delete(id); } catch { /* ignore */ }
+}
 const photos: Photo[] = [];
 let autoPhoto = true;
 let steadySince = 0;
@@ -96,7 +123,9 @@ function takePhoto(deg: number, label: string): void {
   wrap(lastHint, vw * 0.92, x).forEach((ln, i) => say(ln, fs * 1.2 + small * 1.5 * (i + 1), small, "#fff"));
   c.toBlob((b) => {
     if (!b) return;
-    photos.unshift({ url: URL.createObjectURL(b), text: `${label}${lastHint ? " · " + lastHint : ""}`, time: new Date() });
+    const time = new Date(), text = `${label}${lastHint ? " · " + lastHint : ""}`;
+    photos.unshift({ url: URL.createObjectURL(b), text, time });
+    void dbSave(time.getTime(), b, text);
     $("photos").textContent = `Photos (${photos.length})`;
     flash(`Photo ${photos.length} saved`);
     renderGallery();
@@ -125,9 +154,12 @@ function renderGallery() {
         else flash("Press and hold the picture, then choose Save to Photos");
       } catch { /* share cancelled */ }
     };
-    wrapEl.append(cap, img, btn); list.append(wrapEl);
+    const del = document.createElement("button"); del.textContent = "Delete"; del.style.marginLeft = "8px";
+    del.onclick = () => { if (!confirm("Delete this photo from the phone?")) return; photos.splice(photos.indexOf(p), 1); void dbDelete(p.time.getTime()); $("photos").textContent = `Photos (${photos.length})`; renderGallery(); };
+    wrapEl.append(cap, img, btn, del); list.append(wrapEl);
   }
 }
+void dbLoad();
 $("photos").addEventListener("click", () => { renderGallery(); $("gallery").style.display = "flex"; });
 $("closeGallery").addEventListener("click", () => { $("gallery").style.display = "none"; });
 $("autoPhoto").addEventListener("click", () => { autoPhoto = !autoPhoto; $("autoPhoto").classList.toggle("on", autoPhoto); flash(autoPhoto ? "Photos will be taken by themselves" : "Automatic photos off"); });
