@@ -8,6 +8,9 @@ export class Sensors {
   bias: Vec3 = { x: 0, y: 0, z: 0 };
   calibratedAt: number | null = null;
   active = false;
+  /** Compass direction (degrees, clockwise from north) the back camera faces; null until known. */
+  heading: number | null = null;
+  private headingT = 0;
   private lastT = 0;
   private recent: Vec3[] = [];
 
@@ -22,11 +25,17 @@ export class Sensors {
   async start(): Promise<boolean> {
     const DME = (window as any).DeviceMotionEvent;
     if (!DME) return false;
+    const DOE = (window as any).DeviceOrientationEvent;
     if (typeof DME.requestPermission === "function") {
-      const r = await DME.requestPermission();
+      // ask for both at once, while the tap is fresh (iPhone)
+      const asks: Promise<string>[] = [DME.requestPermission()];
+      if (DOE && typeof DOE.requestPermission === "function") asks.push(DOE.requestPermission().catch(() => "denied"));
+      const [r] = await Promise.all(asks);
       if (r !== "granted") return false;
     }
     window.addEventListener("devicemotion", this.onMotion);
+    window.addEventListener("deviceorientationabsolute", this.onOrient as EventListener);
+    window.addEventListener("deviceorientation", this.onOrient as EventListener);
     // wait briefly for a first real reading (desktop browsers fire one with nulls)
     await new Promise((res) => setTimeout(res, 700));
     this.active = this.accel !== null;
@@ -42,6 +51,24 @@ export class Sensors {
     if (this.recent.length > 600) this.recent.shift();
     this.lastT = performance.now();
   };
+
+  private onOrient = (e: DeviceOrientationEvent & { webkitCompassHeading?: number }) => {
+    let h: number | null = null;
+    if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) {
+      h = e.webkitCompassHeading; // iPhone: already the direction the back camera faces when held upright
+    } else if (e.alpha != null && e.beta != null && e.gamma != null && (e.absolute || e.type === "deviceorientationabsolute")) {
+      // Android: work out where the back of the phone points from the three rotation angles
+      const a = (e.alpha * Math.PI) / 180, b = (e.beta * Math.PI) / 180, g = (e.gamma * Math.PI) / 180;
+      const zx = Math.cos(a) * Math.sin(g) + Math.sin(a) * Math.sin(b) * Math.cos(g);
+      const zy = Math.sin(a) * Math.sin(g) - Math.cos(a) * Math.sin(b) * Math.cos(g);
+      h = ((Math.atan2(-zx, -zy) * 180) / Math.PI + 360) % 360;
+    }
+    if (h === null) return;
+    if (this.heading === null || performance.now() - this.headingT > 2000) this.heading = h;
+    else { const d = ((h - this.heading + 540) % 360) - 180; this.heading = (this.heading + d * 0.2 + 360) % 360; } // light smoothing around the circle
+    this.headingT = performance.now();
+  };
+  get headingFresh(): number | null { return this.heading !== null && performance.now() - this.headingT < 2000 ? this.heading : null; }
 
   get fresh() { return this.accel !== null && performance.now() - this.lastT < 1000; }
 

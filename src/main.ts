@@ -2,6 +2,8 @@ import { downInCamera, leanBetween, plumbDirectionAt, rotateForScreen, Smoother,
 import { FilesetResolver, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
 import { analyzeMask, sampleModel, segment, type ColorModel, type Segmentation } from "./segment";
 import { Sensors } from "./sensors";
+import { Team, type ViewMsg } from "./session";
+import { relativeTo, solveLean } from "./combine";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const video = $<HTMLVideoElement>("video");
@@ -190,6 +192,122 @@ $("frame").addEventListener("click", (e) => {
   flash("Learned the tree's colour");
 });
 
+
+// ---- Together: two or three phones combine into the tree's real 3D lean ----
+const team = new Team();
+const joinId = new URLSearchParams(location.hash.slice(1)).get("join");
+if (joinId) $("joinNote").style.display = "block";
+let bendFrac: number | null = null;
+let lockedSince = 0, locked = false;
+let teamLines: string[] = [], teamOk = false;
+function ownView(): ViewMsg {
+  const m = smoother.median;
+  const alpha = m !== null && smoother.count >= 5 ? m : null;
+  const bend = alpha !== null && (bendSeen.median ?? 0) > 0.5 && bendFrac !== null && bendLow.median !== null && bendUp.median !== null
+    ? { frac: bendFrac, low: bendLow.median, up: bendUp.median } : null;
+  return { k: "view", alpha, heading: sensors.headingFresh, bend };
+}
+const side = (v: number, pos: string, neg: string) => (Math.abs(v) < 0.05 ? "no" : Math.abs(v).toFixed(1) + "° " + (v > 0 ? pos : neg));
+function hostCompute() {
+  const me = ownView();
+  const live = team.live();
+  teamOk = false;
+  if (!team.connected) { teamLines = ["Waiting for another phone to join"]; return; }
+  type V = { alpha: number; heading: number; bend: ViewMsg["bend"] };
+  const views: V[] = [];
+  const notes: string[] = [];
+  if (me.alpha !== null && me.heading !== null) views.push({ alpha: me.alpha, heading: me.heading, bend: me.bend });
+  else notes.push(me.heading === null ? "This phone isn't giving a compass direction yet" : "This phone has no reading yet. Point it at the tree");
+  for (const p of live) {
+    if (p.view.alpha !== null && p.view.heading !== null) views.push({ alpha: p.view.alpha, heading: p.view.heading, bend: p.view.bend });
+    else notes.push(`${p.name} ${p.view.heading === null ? "has no compass direction" : "has no reading yet"}`);
+  }
+  if (views.length < 2) { teamLines = notes.length ? notes : ["Waiting for a second reading"]; return; }
+  const c = solveLean(views);
+  if (!c.ok) { teamLines = [c.reason ?? "Can't combine yet", ...notes]; return; }
+  teamOk = true;
+  const rel = relativeTo(c, views[0].heading);
+  const lines = [`Tree leans ${c.theta.toFixed(1)}°`, `${side(rel.right, "to the right", "to the left")} and ${side(rel.away, "away from", "toward")} the host phone`];
+  const bv = views.filter((v) => v.bend);
+  if (bv.length >= 2) {
+    const lo = solveLean(bv.map((v) => ({ alpha: v.bend!.low, heading: v.heading })));
+    const up = solveLean(bv.map((v) => ({ alpha: v.bend!.up, heading: v.heading })));
+    const frac = bv.reduce((t, v) => t + v.bend!.frac, 0) / bv.length;
+    if (lo.ok && up.ok) lines.push(`Bends about ${Math.round(frac * 100)}% of the way up: ${lo.theta.toFixed(1)}° below, ${up.theta.toFixed(1)}° above`);
+  }
+  if (c.spread < 55) lines.push("Tip: move a phone further around the tree (about a quarter turn) for a better reading");
+  teamLines = [...lines, ...notes];
+  // locked: under half a degree, held for 3 seconds
+  const now = performance.now();
+  if (c.theta < 0.5) {
+    if (!lockedSince) lockedSince = now;
+    if (!locked && now - lockedSince >= 3000) { locked = true; lastHint = lines.slice(0, 2).join(" · "); takePhoto(c.theta, `LOCKED ${c.theta.toFixed(1)}°`); }
+  } else if (c.theta > 0.8) { lockedSince = 0; locked = false; }
+}
+function renderTeamBanner() {
+  const el = $("team");
+  let lines: string[] = [], isLocked = false, ok = false;
+  if (team.role === "host") { lines = teamLines; isLocked = locked; ok = teamOk; }
+  else if (team.role === "helper") {
+    const r = team.hostResult;
+    if (r && performance.now() - team.hostResultAt < 4000) { lines = r.lines; isLocked = r.locked; ok = r.ok; } else lines = [team.status || "Connecting..."];
+  } else { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.textContent = "";
+  const theta = ok ? parseFloat((lines[0] ?? "").replace(/[^0-9.]/g, "")) : NaN;
+  const col = isLocked ? "#4cff8a" : isNaN(theta) ? "#fff" : theta < 0.5 ? "#4cff8a" : theta < 1.5 ? "#ffd84c" : "#ff6b5c";
+  const add = (text: string, cls: string, color?: string) => { const d = document.createElement("div"); d.className = cls; d.textContent = text; if (color) d.style.color = color; el.append(d); };
+  if (isLocked) add("LOCKED ✓", "big", "#4cff8a");
+  lines.forEach((l, i) => add(l, i === 0 ? "big" : "sm", i === 0 ? col : undefined));
+}
+const qrCanvas = document.createElement("canvas");
+let qrFor = "";
+function renderTeamPanel() {
+  if ($("teamPanel").style.display !== "flex") return;
+  const body = $("teamBody");
+  body.textContent = "";
+  const add = (tag: string, text: string, cls = "") => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; body.append(e); return e; };
+  if (team.role === "none") {
+    add("div", "Use two or three phones at once to get the tree's real lean in every direction, and where it bends.");
+    add("div", "Put one phone on each of two sides of the tree, about a quarter turn apart, both pointed at the tree. Every phone needs this page open.");
+    const b = add("button", "Host a session (this phone)") as HTMLButtonElement;
+    b.onclick = async () => { try { await team.host(); } catch { /* status shows */ } renderTeamPanel(); };
+    add("div", "To join someone else's session, scan the code on their phone with your camera.", "url");
+    if (team.status) add("div", team.status);
+    return;
+  }
+  if (team.role === "host") {
+    if (team.joinUrl) {
+      add("div", "Have the other phones scan this with their camera:");
+      body.append(qrCanvas); if (qrFor !== team.joinUrl) { qrFor = team.joinUrl; void team.qr(qrCanvas); }
+      add("div", team.joinUrl, "url");
+      const sh = add("button", "Share the link instead") as HTMLButtonElement;
+      sh.onclick = () => { if ((navigator as any).share) (navigator as any).share({ url: team.joinUrl, title: "Join my tree session" }).catch(() => {}); else navigator.clipboard?.writeText(team.joinUrl); flash("Link ready to paste"); };
+    }
+    add("div", team.status);
+    const hd = sensors.headingFresh;
+    add("div", `You (Phone 1): reading ${ownView().alpha?.toFixed(1) ?? "none yet"}°, compass ${hd === null ? "none" : Math.round(hd) + "°"}`, "phone");
+    for (const p of team.live(8000)) add("div", `${p.name}: reading ${p.view.alpha?.toFixed(1) ?? "none yet"}°, compass ${p.view.heading === null ? "none" : Math.round(p.view.heading) + "°"}`, "phone");
+    const st = add("button", "Stop the session") as HTMLButtonElement;
+    st.onclick = () => { team.stop(); locked = false; lockedSince = 0; renderTeamPanel(); renderTeamBanner(); };
+    return;
+  }
+  add("div", team.status);
+  if (team.name) add("div", `You are ${team.name}. Point the camera at the tree from your side and hold the phone steady.`);
+  const lv = add("button", "Leave") as HTMLButtonElement;
+  lv.onclick = () => { team.stop(); renderTeamPanel(); renderTeamBanner(); };
+}
+team.onChange = () => { renderTeamPanel(); renderTeamBanner(); };
+$("together").addEventListener("click", () => { $("teamPanel").style.display = "flex"; renderTeamPanel(); });
+$("closeTeam").addEventListener("click", () => { $("teamPanel").style.display = "none"; });
+let panelTick = 0;
+setInterval(() => {
+  if (team.role === "helper") team.send(ownView());
+  else if (team.role === "host") { hostCompute(); team.broadcast({ k: "result", lines: teamLines, locked, ok: teamOk, phones: team.live().length + 1 }); }
+  renderTeamBanner();
+  if (++panelTick % 3 === 0 && team.role === "host") renderTeamPanel();
+}, 300);
+
 async function start() {
   const err = $("err");
   err.textContent = "";
@@ -210,6 +328,7 @@ async function start() {
     return;
   }
   $("splash").style.display = "none";
+  if (joinId) team.join(joinId);
   if (!motionOk) hint("No motion sensor available. Lean is measured against the screen's up, not true plumb. Hold the phone very straight.", 8000);
   requestAnimationFrame(loop);
 }
@@ -309,7 +428,8 @@ function updateReadout(seg: Segmentation, gdown: Vec3 | null) {
     const bent = bendSeen.count > 8 && (bendSeen.median ?? 0) > 0.5 && bendY.count > 4;
     if (!steady) hint("Settling... hold still");
     else if (bent) {
-      const pct = Math.round(Math.min(1, Math.max(0, (seg.bottom - (bendY.median ?? 0)) / Math.max(1, seg.bottom - seg.top))) * 100), lo = bendLow.median ?? 0, up = bendUp.median ?? 0;
+      bendFrac = Math.min(1, Math.max(0, (seg.bottom - (bendY.median ?? 0)) / Math.max(1, seg.bottom - seg.top)));
+      const pct = Math.round(bendFrac * 100), lo = bendLow.median ?? 0, up = bendUp.median ?? 0;
       const side = (v: number) => (Math.abs(v) < 0.05 ? "straight" : Math.abs(v).toFixed(1) + "° " + (v > 0 ? "right" : "left"));
       hint(`Bends about ${pct}% of the way up. Below it: ${side(lo)}. Above it: ${side(up)}. Seen from this side only.`);
     } else if (bendSeen.count > 8) hint("One smooth lean, no bend found. Seen from this side only.");

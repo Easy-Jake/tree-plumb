@@ -27,9 +27,18 @@
   #gallery .list { overflow-y: auto; padding: 0 12px 24px; display: flex; flex-direction: column; gap: 18px; }
   #gallery img { width: 100%; border-radius: 10px; display: block; }
   #gallery .cap { font-size: 14px; opacity: .8; margin: 4px 2px 6px; }
+  #team { margin: 8px auto 0; max-width: 92vw; font-size: 16px; font-weight: 700; display: none; background: rgba(0,0,0,.55); border-radius: 12px; padding: 8px 12px; }
+  #team .big { font-size: 26px; font-weight: 800; }
+  #team .sm { font-size: 13px; font-weight: 500; opacity: .9; }
+  #teamPanel { position: fixed; inset: 0; background: #0b0b0b; z-index: 7; display: none; flex-direction: column; }
+  #teamPanel .top { display: flex; justify-content: space-between; align-items: center; padding: max(12px, env(safe-area-inset-top)) 14px 10px; }
+  #teamPanel .body { overflow-y: auto; padding: 0 16px 30px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+  #teamPanel canvas { background: #fff; border-radius: 10px; }
+  #teamPanel .url { font-size: 12px; opacity: .7; word-break: break-all; }
+  #teamPanel .phone { font-size: 15px; }
   #gallery .empty { opacity: .7; padding: 20px 4px; }
   button.on { background: #1e6bff; border-color: #1e6bff; }
-  #status { position: fixed; left: 8px; bottom: 74px; font-size: 12px; opacity: .8; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  #status { position: fixed; left: 8px; bottom: 132px; font-size: 12px; opacity: .8; text-shadow: 0 1px 3px #000; pointer-events: none; }
   #splash { position: fixed; inset: 0; background: #0b1a10; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 14px; z-index: 5; }
   #splash h1 { margin: 0; font-size: 34px; }
   #splash p { margin: 0; max-width: 28em; opacity: .85; }
@@ -43,7 +52,7 @@
   <video id="video" playsinline muted autoplay></video>
   <canvas id="overlay"></canvas>
 </div></div>
-<div id="readout"><div id="deg">--</div><div id="dir"></div><div id="hint"></div></div>
+<div id="readout"><div id="deg">--</div><div id="dir"></div><div id="hint"></div><div id="team"></div></div>
 <div id="status"></div>
 <div id="bar">
   <button id="cal">Calibrate</button>
@@ -51,13 +60,16 @@
   <button id="auto">Smart find</button>
   <button id="autoPhoto" class="on">Auto photos</button>
   <button id="photos">Photos (0)</button>
+  <button id="together">Together</button>
 </div>
 <div id="gallery"><div class="top"><b>Saved photos</b><button id="closeGallery">Close</button></div><div class="list" id="galleryList"></div></div>
+<div id="teamPanel"><div class="top"><b>Together</b><button id="closeTeam">Close</button></div><div class="body" id="teamBody"></div></div>
 <div id="msg"></div>
 <div id="splash">
-  <h1>Erection Correction</h1><p style="font-size:13px;opacity:.6">version 6: photos are kept on the phone</p>
+  <h1>Erection Correction</h1><p style="font-size:13px;opacity:.6">version 7: several phones together</p>
   <p>Stand back from the tree with your phone held upright, pointed at the whole tree. Everything runs on this phone; no video leaves it.</p>
   <p>It finds the tree by itself. If it picks the wrong thing, tap the tree on screen.</p>
+  <p id="joinNote" style="display:none;color:#8fe3a8;font-weight:600">You are joining a friend’s session. Tap Start, then point your phone at the tree from your side.</p>
   <button id="start">Start</button>
   <div id="err"></div>
 </div>

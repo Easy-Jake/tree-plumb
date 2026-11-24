@@ -148,3 +148,41 @@ describe("bend detection", () => {
     expect(findBend(t.ys, t.xs)).toBeNull();
   });
 });
+
+import { solveLean, relativeTo, headingGap } from "../src/combine";
+describe("combining phones", () => {
+  // forward model: a tree leaning theta toward compass phi, seen by a phone facing heading h
+  const see = (theta: number, phi: number, h: number) => {
+    const L = Math.tan((theta * Math.PI) / 180), lx = L * Math.sin((phi * Math.PI) / 180), ly = L * Math.cos((phi * Math.PI) / 180);
+    const rx = Math.cos((h * Math.PI) / 180), ry = -Math.sin((h * Math.PI) / 180);
+    return (Math.atan(lx * rx + ly * ry) * 180) / Math.PI;
+  };
+  it("recovers size and direction from two phones a quarter turn apart", () => {
+    for (const [theta, phi] of [[3, 30], [2, 200], [4.5, 315], [1, 90]]) {
+      const views = [0, 90].map((h) => ({ heading: h, alpha: see(theta, phi, h) }));
+      const c = solveLean(views);
+      expect(c.ok).toBe(true);
+      expect(c.theta).toBeCloseTo(theta, 1);
+      expect(Math.abs(headingGap(c.compass, phi))).toBeLessThan(0.5);
+    }
+  });
+  it("copes with three phones and wandering compass headings", () => {
+    const hs = [10, 100, 215];
+    const views = hs.map((h) => ({ heading: h + (h === 100 ? 4 : -3), alpha: see(2.5, 120, h) }));
+    const c = solveLean(views);
+    expect(c.ok).toBe(true);
+    expect(Math.abs(c.theta - 2.5)).toBeLessThan(0.6);
+  });
+  it("refuses two phones on nearly the same line of sight", () => {
+    expect(solveLean([{ heading: 0, alpha: 1 }, { heading: 10, alpha: 1.2 }]).ok).toBe(false);
+    expect(solveLean([{ heading: 0, alpha: 1 }, { heading: 180, alpha: -1 }]).ok).toBe(false);
+    expect(solveLean([{ heading: 0, alpha: 1 }]).ok).toBe(false);
+  });
+  it("splits the lean into right-of and away-from the host phone", () => {
+    const c = solveLean([0, 90].map((h) => ({ heading: h, alpha: see(3, 0, h) }))); // leans due north
+    const r = relativeTo(c, 0); // host faces north: leaning straight away
+    expect(r.away).toBeCloseTo(3, 1); expect(Math.abs(r.right)).toBeLessThan(0.1);
+    const r2 = relativeTo(c, 90); // facing east: north is to the left
+    expect(r2.right).toBeCloseTo(-3, 1);
+  });
+});
